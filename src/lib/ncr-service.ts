@@ -8,6 +8,7 @@ import {
   deleteDoc,
   query,
   orderBy,
+  where,
   Timestamp,
   serverTimestamp,
 } from 'firebase/firestore'
@@ -43,6 +44,8 @@ function docToNCR(id: string, data: Record<string, unknown>): NCR {
     updatedAt: toDate(data.updatedAt) ?? new Date(),
     dueDate: toDate(data.dueDate),
     closedAt: toDate(data.closedAt),
+    isArchived: Boolean(data.isArchived),
+    archivedAt: toDate(data.archivedAt),
   }
 }
 
@@ -54,11 +57,26 @@ async function generateNCRNumber(): Promise<string> {
   return `NCR-${year}-${String(count).padStart(4, '0')}`
 }
 
-// Get all NCRs, newest first
+// Get all non-archived NCRs, newest first
 export async function getAllNCRs(): Promise<NCR[]> {
   const q = query(collection(db, COLLECTION), orderBy('createdAt', 'desc'))
   const snapshot = await getDocs(q)
-  return snapshot.docs.map((d) => docToNCR(d.id, d.data()))
+  return snapshot.docs
+    .map((d) => docToNCR(d.id, d.data()))
+    .filter((n) => !n.isArchived)
+}
+
+// Get all archived NCRs (recycle bin), most recently archived first
+export async function getArchivedNCRs(): Promise<NCR[]> {
+  const snapshot = await getDocs(collection(db, COLLECTION))
+  return snapshot.docs
+    .map((d) => docToNCR(d.id, d.data()))
+    .filter((n) => n.isArchived)
+    .sort((a, b) => {
+      const ta = a.archivedAt?.getTime() ?? 0
+      const tb = b.archivedAt?.getTime() ?? 0
+      return tb - ta
+    })
 }
 
 // Get a single NCR by ID
@@ -87,6 +105,7 @@ export async function createNCR(input: CreateNCRInput): Promise<string> {
     reportedBy: user.email ?? user.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    isArchived: false,
   }
 
   if (input.dueDate) {
@@ -122,8 +141,28 @@ export async function updateNCR(id: string, input: UpdateNCRInput): Promise<void
   await updateDoc(ref, payload)
 }
 
-// Delete an NCR
-export async function deleteNCR(id: string): Promise<void> {
+// Move NCR to recycle bin (soft delete)
+export async function archiveNCR(id: string): Promise<void> {
+  const ref = doc(db, COLLECTION, id)
+  await updateDoc(ref, {
+    isArchived: true,
+    archivedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+// Restore NCR from recycle bin
+export async function restoreNCR(id: string): Promise<void> {
+  const ref = doc(db, COLLECTION, id)
+  await updateDoc(ref, {
+    isArchived: false,
+    archivedAt: null,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+// Permanently delete an NCR (only from recycle bin)
+export async function permanentlyDeleteNCR(id: string): Promise<void> {
   const ref = doc(db, COLLECTION, id)
   await deleteDoc(ref)
 }

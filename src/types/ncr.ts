@@ -15,6 +15,8 @@ export interface NCR {
   updatedAt: Date
   dueDate?: Date
   closedAt?: Date
+  isArchived?: boolean
+  archivedAt?: Date
 }
 
 export interface CreateNCRInput {

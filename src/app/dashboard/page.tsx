@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { getAllNCRs } from '@/lib/ncr-service';
 import { NCR, NCRStatus, NCRPriority } from '@/types/ncr';
+import BrandHeader from '../../components/BrandHeader';
+import BrandFooter from '../../components/BrandFooter';
 
 type SortKey = 'ncrNumber' | 'title' | 'department' | 'status' | 'priority' | 'dueDate' | 'assignee';
 type SortDir = 'asc' | 'desc';
@@ -86,11 +88,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) {
-        router.push('/login');
-      } else {
-        setUser(u);
-      }
+      if (!u) router.push('/login');
+      else setUser(u);
       setAuthChecked(true);
     });
     return () => unsub();
@@ -133,16 +132,7 @@ export default function DashboardPage() {
     let list = ncrs.filter((n) => {
       if (statusFilter !== 'all' && n.status !== statusFilter) return false;
       if (!q) return true;
-      const hay = [
-        n.ncrNumber,
-        n.title,
-        n.description,
-        n.department,
-        n.assignee,
-        n.reportedBy,
-        n.status,
-        n.priority,
-      ]
+      const hay = [n.ncrNumber, n.title, n.description, n.department, n.assignee, n.reportedBy, n.status, n.priority]
         .map((v) => String(v ?? '').toLowerCase())
         .join(' ');
       return hay.includes(q);
@@ -184,11 +174,6 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleSignOut() {
-    await signOut(auth);
-    router.push('/login');
-  }
-
   if (!authChecked) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -198,38 +183,10 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold bg-gradient-to-r from-sky-300 to-sky-500 bg-clip-text text-transparent">
-              SQS NCR Tracker
-            </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {user?.email}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/dashboard/new"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-sm font-medium transition-colors shadow-lg shadow-sky-500/20"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" />
-              </svg>
-              New NCR
-            </Link>
-            <button
-              onClick={handleSignOut}
-              className="px-3 py-2 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <BrandHeader userEmail={user?.email} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
           <StatCard label="Total" value={stats.total} tone="slate" />
           <StatCard label="Open" value={stats.open} tone="sky" />
@@ -240,16 +197,8 @@ export default function DashboardPage() {
 
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <div className="relative flex-1">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
-                clipRule="evenodd"
-              />
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
             </svg>
             <input
               type="text"
@@ -306,25 +255,16 @@ export default function DashboardPage() {
                 </thead>
                 <tbody>
                   {filtered.map((n) => {
-                    const isOverdue =
-                      n.status !== 'closed' &&
-                      toTime(n.dueDate) > 0 &&
-                      toTime(n.dueDate) < Date.now();
+                    const isOverdue = n.status !== 'closed' && toTime(n.dueDate) > 0 && toTime(n.dueDate) < Date.now();
                     return (
                       <tr
                         key={n.id}
                         onClick={() => router.push(`/dashboard/${n.id}`)}
                         className="border-b border-slate-800 last:border-0 hover:bg-slate-800/40 cursor-pointer transition-colors"
                       >
-                        <td className="px-4 py-3 font-mono text-sky-300">
-                          {n.ncrNumber}
-                        </td>
-                        <td className="px-4 py-3 text-slate-100 max-w-xs truncate">
-                          {n.title}
-                        </td>
-                        <td className="px-4 py-3 text-slate-300">
-                          {n.department || '—'}
-                        </td>
+                        <td className="px-4 py-3 font-mono text-sky-300">{n.ncrNumber}</td>
+                        <td className="px-4 py-3 text-slate-100 max-w-xs truncate">{n.title}</td>
+                        <td className="px-4 py-3 text-slate-300">{n.department || '—'}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium border ${STATUS_STYLES[n.status]}`}>
                             {STATUS_LABELS[n.status]}
@@ -339,9 +279,7 @@ export default function DashboardPage() {
                           {formatDate(n.dueDate)}
                           {isOverdue && <span className="ml-2 text-xs">⚠</span>}
                         </td>
-                        <td className="px-4 py-3 text-slate-300">
-                          {n.assignee || '—'}
-                        </td>
+                        <td className="px-4 py-3 text-slate-300">{n.assignee || '—'}</td>
                       </tr>
                     );
                   })}
@@ -357,19 +295,13 @@ export default function DashboardPage() {
           </p>
         )}
       </main>
+
+      <BrandFooter />
     </div>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: 'slate' | 'sky' | 'amber' | 'emerald' | 'rose';
-}) {
+function StatCard({ label, value, tone }: { label: string; value: number; tone: 'slate' | 'sky' | 'amber' | 'emerald' | 'rose' }) {
   const tones: Record<typeof tone, string> = {
     slate: 'text-slate-200',
     sky: 'text-sky-300',
@@ -385,17 +317,7 @@ function StatCard({
   );
 }
 
-function SortableHeader({
-  label,
-  active,
-  dir,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  dir: SortDir;
-  onClick: () => void;
-}) {
+function SortableHeader({ label, active, dir, onClick }: { label: string; active: boolean; dir: SortDir; onClick: () => void }) {
   return (
     <th
       onClick={onClick}
