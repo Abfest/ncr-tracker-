@@ -5,83 +5,121 @@ import Image from 'next/image';
 interface SQSLogoProps {
   size?: number;
   className?: string;
-  /**
-   * @deprecated The wordmark is part of the logo image now — toggle has no effect.
-   * Kept in the API so existing callers don't break.
-   */
+  variant?: 'primary' | 'secondary' | 'icon';
+  // Legacy props — kept so existing callers don't break
   showWordmark?: boolean;
-  tagline?: string;
+  tagline?: boolean;
 }
 
 /**
- * Smart Quality brand signature.
- * Uses the actual logo image (Antonio Franco / Smart Quality wordmark + S mark).
+ * Smart Quality Systems brand signature.
+ * Uses real PNG files from /public/brand/
  *
- * The logo image lives at /public/sqs-logo.png and contains the full lockup,
- * so showWordmark is no longer needed — the wordmark is baked in.
+ * variant='secondary'  → S mark + divider + ANTONIO FRANCO / SMART QUALITY SYSTEMS (header use)
+ * variant='primary'    → S mark + full wordmark + tagline (login hero)
+ * variant='icon'       → S mark only (compact spaces)
  *
  * Usage:
- *   <SQSLogo size={32} />                           → just the logo, header size
- *   <SQSLogo size={64} tagline="NCR TRACKER" />     → logo + tagline below
+ *   <SQSLogo variant="secondary" size={40} />   → header
+ *   <SQSLogo variant="primary"   size={80} />   → login hero
+ *   <SMarkIcon size={36} />                     → icon only
  */
 export default function SQSLogo({
   size = 40,
   className = '',
-  tagline,
+  variant = 'secondary',
 }: SQSLogoProps) {
-  // The logo image is 340x106, so aspect ratio ~3.21:1
-  // We'll size by height and let width scale naturally
-  const aspectRatio = 340 / 106;
-  const width = Math.round(size * aspectRatio);
-  const height = size;
+  if (variant === 'primary') {
+    // sqs-primary-logo.png is 600x202 → aspect 2.97:1
+    const w = Math.round(size * 2.97);
+    return (
+      <div className={className} style={{ display: 'inline-block', lineHeight: 0 }}>
+        <Image
+          src="/brand/sqs-primary-logo.png"
+          alt="Antonio Franco - Smart Quality Systems"
+          width={w}
+          height={size}
+          priority
+          style={{ objectFit: 'contain' }}
+        />
+      </div>
+    );
+  }
 
+  if (variant === 'icon') {
+    // sqs-icon-s.png is 164x116 → aspect 1.41:1
+    const w = Math.round(size * 1.41);
+    return (
+      <div className={className} style={{ display: 'inline-block', lineHeight: 0 }}>
+        <Image
+          src="/brand/sqs-icon-s.png"
+          alt="Smart Quality Systems"
+          width={w}
+          height={size}
+          priority
+          style={{ objectFit: 'contain' }}
+        />
+      </div>
+    );
+  }
+
+  // Default: secondary — sqs-secondary-logo.png is 558x120 → aspect 4.65:1
+  const w = Math.round(size * 4.65);
   return (
-    <div className={`inline-flex flex-col ${className}`}>
+    <div className={className} style={{ display: 'inline-block', lineHeight: 0 }}>
       <Image
-        src="/sqs-logo.png"
-        alt="Antonio Franco - Smart Quality"
-        width={width}
-        height={height}
+        src="/brand/sqs-secondary-logo.png"
+        alt="Antonio Franco - Smart Quality Systems"
+        width={w}
+        height={size}
         priority
-        className="object-contain"
+        style={{ objectFit: 'contain' }}
       />
-      {tagline && (
-        <span className="text-sky-400 font-light tracking-[0.25em] text-[10px] mt-1.5 ml-1">
-          {tagline}
-        </span>
-      )}
     </div>
   );
 }
 
 /**
- * Just the S mark portion (for favicons or compact spaces).
- * Since we're using the image, we slice out just the left portion via CSS.
+ * Just the S mark — for tight header spaces.
+ * Uses sqs-icon-s.png (164x116)
  */
-export function LogoMark({ size = 32 }: { size?: number }) {
+export function SMarkIcon({ size = 40, className = '' }: { size?: number; className?: string }) {
+  const w = Math.round(size * 1.41);
   return (
-    <div
-      className="inline-block bg-no-repeat bg-contain bg-left"
-      style={{
-        width: size,
-        height: size,
-        backgroundImage: 'url(/sqs-logo.png)',
-        backgroundSize: 'auto 100%',
-      }}
-      aria-label="Smart Quality logo"
+    <Image
+      src="/brand/sqs-icon-s.png"
+      alt="Smart Quality Systems"
+      width={w}
+      height={size}
+      priority
+      className={className}
+      style={{ objectFit: 'contain' }}
     />
   );
 }
 
 /**
- * Full Smart Quality wordmark.
- * Same image as SQSLogo but at a larger fixed size for hero/login moments.
+ * Brand icon — S in rounded square. Use for app icon / social media.
+ * Uses sqs-brand-icon.png (146x124 → roughly square)
  */
-export function SQSWordmark({ size = 'md' }: { size?: 'md' | 'lg' | 'xl' }) {
-  const heights = {
-    md: 48,
-    lg: 72,
-    xl: 96,
-  };
-  return <SQSLogo size={heights[size]} />;
+export function SQSBrandIcon({ size = 40, className = '' }: { size?: number; className?: string }) {
+  return (
+    <Image
+      src="/brand/sqs-brand-icon.png"
+      alt="Smart Quality Systems"
+      width={size}
+      height={size}
+      priority
+      className={className}
+      style={{ objectFit: 'contain' }}
+    />
+  );
+}
+
+/**
+ * Full hero wordmark for login page.
+ */
+export function SQSWordmark({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' | 'xl' }) {
+  const heights = { sm: 40, md: 60, lg: 80, xl: 100 };
+  return <SQSLogo variant="primary" size={heights[size]} />;
 }

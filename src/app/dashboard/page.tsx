@@ -1,89 +1,79 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { getAllNCRs } from '@/lib/ncr-service';
 import { NCR, NCRStatus, NCRPriority } from '@/types/ncr';
-import BrandHeader from '../../components/BrandHeader';
-import BrandFooter from '../../components/BrandFooter';
+import BrandHeader from '@/components/BrandHeader';
+import BrandFooter from '@/components/BrandFooter';
+import { PRIORITY_ORDER, STATUS_ORDER } from '@/lib/constants';
 
-type SortKey = 'ncrNumber' | 'title' | 'department' | 'status' | 'priority' | 'dueDate' | 'assignee';
-type SortDir = 'asc' | 'desc';
-type StatusFilter = 'all' | NCRStatus;
+// ── Priority styles — bold, high-contrast ──────────────────────────
+const PRIORITY_STYLES: Record<NCRPriority, { pill: string; dot: string; label: string }> = {
+  critical: {
+    pill: 'bg-rose-500/25 text-rose-300 border border-rose-500/60 font-semibold',
+    dot: 'bg-rose-500',
+    label: 'Critical',
+  },
+  high: {
+    pill: 'bg-amber-500/25 text-amber-300 border border-amber-500/60 font-semibold',
+    dot: 'bg-amber-500',
+    label: 'High',
+  },
+  medium: {
+    pill: 'bg-sky-500/20 text-sky-300 border border-sky-500/50',
+    dot: 'bg-sky-400',
+    label: 'Medium',
+  },
+  low: {
+    pill: 'bg-slate-600/30 text-slate-400 border border-slate-600/50',
+    dot: 'bg-slate-500',
+    label: 'Low',
+  },
+};
 
 const STATUS_STYLES: Record<NCRStatus, string> = {
-  'open': 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  'in-progress': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  'closed': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  open: 'bg-sky-500/20 text-sky-300 border border-sky-500/40',
+  'in-progress': 'bg-amber-500/20 text-amber-300 border border-amber-500/40',
+  closed: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
 };
 
 const STATUS_LABELS: Record<NCRStatus, string> = {
-  'open': 'Open',
+  open: 'Open',
   'in-progress': 'In Progress',
-  'closed': 'Closed',
+  closed: 'Closed',
 };
 
-const PRIORITY_STYLES: Record<NCRPriority, string> = {
-  'low': 'bg-slate-500/15 text-slate-300 border-slate-500/30',
-  'medium': 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  'high': 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  'critical': 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-};
+type SortKey = 'priority' | 'dueDate' | 'ncrNumber' | 'status' | 'department';
+type SortDir = 'asc' | 'desc';
 
-const PRIORITY_LABELS: Record<NCRPriority, string> = {
-  'low': 'Low',
-  'medium': 'Medium',
-  'high': 'High',
-  'critical': 'Critical',
-};
-
-function formatDate(value: Date | undefined): string {
-  if (!value) return '—';
-  try {
-    let d: Date;
-    if (typeof value === 'object' && value !== null && 'toDate' in value) {
-      d = (value as unknown as { toDate: () => Date }).toDate();
-    } else if (value instanceof Date) {
-      d = value;
-    } else {
-      d = new Date(value as unknown as string | number);
-    }
-    if (isNaN(d.getTime())) return '—';
-    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-  } catch {
-    return '—';
-  }
+function isoDate(d: Date | undefined): string {
+  if (!d) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
-function toTime(value: Date | undefined): number {
-  if (!value) return 0;
-  try {
-    if (typeof value === 'object' && value !== null && 'toDate' in value) {
-      return (value as unknown as { toDate: () => Date }).toDate().getTime();
-    }
-    if (value instanceof Date) return value.getTime();
-    const t = new Date(value as unknown as string | number).getTime();
-    return isNaN(t) ? 0 : t;
-  } catch {
-    return 0;
-  }
+function isOverdue(ncr: NCR): boolean {
+  if (ncr.status === 'closed' || !ncr.dueDate) return false;
+  return isoDate(new Date()) > isoDate(ncr.dueDate);
 }
 
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-
   const [ncrs, setNcrs] = useState<NCR[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [sortKey, setSortKey] = useState<SortKey>('dueDate');
+  const [statusFilter, setStatusFilter] = useState<NCRStatus | 'all'>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('priority');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   useEffect(() => {
@@ -97,105 +87,124 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!user) return;
-    let cancelled = false;
     (async () => {
       try {
         setLoading(true);
         const data = await getAllNCRs();
-        if (!cancelled) setNcrs(data);
+        setNcrs(data);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load NCRs');
+        setError(e instanceof Error ? e.message : 'Failed to load NCRs');
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [user]);
 
-  const stats = useMemo(() => {
-    const total = ncrs.length;
-    const open = ncrs.filter((n) => n.status === 'open').length;
-    const inProgress = ncrs.filter((n) => n.status === 'in-progress').length;
-    const closed = ncrs.filter((n) => n.status === 'closed').length;
-    const overdue = ncrs.filter((n) => {
-      if (n.status === 'closed') return false;
-      const t = toTime(n.dueDate);
-      return t > 0 && t < Date.now();
-    }).length;
-    return { total, open, inProgress, closed, overdue };
-  }, [ncrs]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let list = ncrs.filter((n) => {
-      if (statusFilter !== 'all' && n.status !== statusFilter) return false;
-      if (!q) return true;
-      const hay = [n.ncrNumber, n.title, n.description, n.department, n.assignee, n.reportedBy, n.status, n.priority]
-        .map((v) => String(v ?? '').toLowerCase())
-        .join(' ');
-      return hay.includes(q);
-    });
-
-    const priorityRank: Record<NCRPriority, number> = { low: 1, medium: 2, high: 3, critical: 4 };
-    const statusRank: Record<NCRStatus, number> = { 'open': 1, 'in-progress': 2, 'closed': 3 };
-
-    list = [...list].sort((a, b) => {
-      let av: string | number;
-      let bv: string | number;
-      if (sortKey === 'dueDate') {
-        av = toTime(a.dueDate);
-        bv = toTime(b.dueDate);
-      } else if (sortKey === 'priority') {
-        av = priorityRank[a.priority];
-        bv = priorityRank[b.priority];
-      } else if (sortKey === 'status') {
-        av = statusRank[a.status];
-        bv = statusRank[b.status];
-      } else {
-        av = String(a[sortKey] ?? '').toLowerCase();
-        bv = String(b[sortKey] ?? '').toLowerCase();
-      }
-      if (av < bv) return sortDir === 'asc' ? -1 : 1;
-      if (av > bv) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    return list;
-  }, [ncrs, search, statusFilter, sortKey, sortDir]);
-
   function handleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortKey(key);
-      setSortDir('asc');
-    }
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
   }
 
-  if (!authChecked) {
+  const filtered = useMemo(() => {
+    let result = [...ncrs];
+
+    // Status filter
+    if (statusFilter !== 'all') {
+      result = result.filter(n => n.status === statusFilter);
+    }
+
+    // Search
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(n =>
+        n.ncrNumber.toLowerCase().includes(q) ||
+        n.title.toLowerCase().includes(q) ||
+        n.department.toLowerCase().includes(q) ||
+        n.assignee.toLowerCase().includes(q) ||
+        n.description.toLowerCase().includes(q)
+      );
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case 'priority': {
+          // Primary: priority (Critical first)
+          const pCmp = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+          if (pCmp !== 0) { cmp = pCmp; break; }
+          // Secondary: status (Open before Closed)
+          cmp = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+          break;
+        }
+        case 'status': {
+          const sCmp = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+          if (sCmp !== 0) { cmp = sCmp; break; }
+          cmp = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+          break;
+        }
+        case 'dueDate': {
+          const aDate = a.dueDate ? isoDate(a.dueDate) : '9999';
+          const bDate = b.dueDate ? isoDate(b.dueDate) : '9999';
+          cmp = aDate.localeCompare(bDate);
+          break;
+        }
+        case 'ncrNumber':
+          cmp = a.ncrNumber.localeCompare(b.ncrNumber);
+          break;
+        case 'department':
+          cmp = a.department.localeCompare(b.department);
+          break;
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return result;
+  }, [ncrs, search, statusFilter, sortKey, sortDir]);
+
+  // Stats
+  const total = ncrs.length;
+  const openCount = ncrs.filter(n => n.status === 'open').length;
+  const inProgressCount = ncrs.filter(n => n.status === 'in-progress').length;
+  const closedCount = ncrs.filter(n => n.status === 'closed').length;
+  const overdueCount = ncrs.filter(isOverdue).length;
+  const criticalCount = ncrs.filter(n => n.priority === 'critical' && n.status !== 'closed').length;
+
+  if (!authChecked || loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="text-slate-400">Loading…</div>
+      <div className="min-h-screen bg-[#0B1320] flex items-center justify-center">
+        <div className="text-slate-400" style={{ fontFamily: "'Poppins', sans-serif" }}>Loading…</div>
       </div>
     );
   }
 
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return <span className="text-slate-600 ml-1">↕</span>;
+    return <span className="text-sky-400 ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <BrandHeader userEmail={user?.email} />
+    <div className="min-h-screen flex flex-col" style={{ background: '#0B1320', fontFamily: "'Poppins', sans-serif" }}>
+      <BrandHeader userEmail={user?.email} showActions />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-          <StatCard label="Total" value={stats.total} tone="slate" />
-          <StatCard label="Open" value={stats.open} tone="sky" />
-          <StatCard label="In Progress" value={stats.inProgress} tone="amber" />
-          <StatCard label="Closed" value={stats.closed} tone="emerald" />
-          <StatCard label="Overdue" value={stats.overdue} tone="rose" />
+
+        {error && (
+          <div className="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error}</div>
+        )}
+
+        {/* ── Stat cards ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+          <StatCard label="Total" value={total} color="text-slate-100" />
+          <StatCard label="Open" value={openCount} color="text-sky-300" />
+          <StatCard label="In Progress" value={inProgressCount} color="text-amber-300" />
+          <StatCard label="Closed" value={closedCount} color="text-emerald-300" />
+          <StatCard label="Overdue" value={overdueCount} color="text-rose-400" highlight={overdueCount > 0} />
+          <StatCard label="Critical" value={criticalCount} color="text-rose-300" highlight={criticalCount > 0} />
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        {/* ── Search + Filter ── */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
@@ -205,13 +214,15 @@ export default function DashboardPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search NCRs by number, title, department, assignee…"
-              className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-colors"
+              className="w-full pl-9 pr-4 py-2.5 rounded-lg text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+              style={{ background: '#0F1C30', border: '1px solid rgba(38,132,255,0.2)', fontFamily: "'Poppins', sans-serif" }}
             />
           </div>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="px-4 py-2.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-colors"
+            onChange={(e) => setStatusFilter(e.target.value as NCRStatus | 'all')}
+            className="px-3 py-2.5 rounded-lg text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            style={{ background: '#0F1C30', border: '1px solid rgba(38,132,255,0.2)', fontFamily: "'Poppins', sans-serif" }}
           >
             <option value="all">All statuses</option>
             <option value="open">Open</option>
@@ -220,80 +231,98 @@ export default function DashboardPage() {
           </select>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 overflow-hidden">
-          {loading ? (
-            <div className="p-12 text-center text-slate-400">Loading NCRs…</div>
-          ) : error ? (
-            <div className="p-12 text-center text-rose-400">{error}</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-slate-400 mb-4">
-                {ncrs.length === 0 ? 'No NCRs yet.' : 'No NCRs match your filters.'}
-              </p>
-              {ncrs.length === 0 && (
-                <Link
-                  href="/dashboard/new"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-sm font-medium transition-colors"
-                >
-                  Create your first NCR
-                </Link>
+        {/* ── NCR Table ── */}
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(38,132,255,0.15)' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: '#0F1C30', borderBottom: '1px solid rgba(38,132,255,0.15)' }}>
+                {[
+                  { key: 'ncrNumber', label: 'NCR #' },
+                  { key: null, label: 'Title' },
+                  { key: 'department', label: 'Department' },
+                  { key: 'status', label: 'Status' },
+                  { key: 'priority', label: 'Priority' },
+                  { key: 'dueDate', label: 'Due Date' },
+                  { key: null, label: 'Assignee' },
+                ].map(({ key, label }) => (
+                  <th
+                    key={label}
+                    onClick={() => key && handleSort(key as SortKey)}
+                    className={`px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider ${key ? 'cursor-pointer hover:text-slate-200' : ''}`}
+                  >
+                    {label}{key && <SortIcon col={key as SortKey} />}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                    {search || statusFilter !== 'all' ? 'No NCRs match your search.' : 'No NCRs yet. Create your first one.'}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((ncr, idx) => {
+                  const overdue = isOverdue(ncr);
+                  const pri = PRIORITY_STYLES[ncr.priority];
+                  return (
+                    <tr
+                      key={ncr.id}
+                      onClick={() => router.push(`/dashboard/${ncr.id}`)}
+                      className="cursor-pointer transition-colors hover:bg-white/5"
+                      style={{
+                        borderBottom: idx < filtered.length - 1 ? '1px solid rgba(38,132,255,0.08)' : 'none',
+                        background: ncr.priority === 'critical' && ncr.status !== 'closed'
+                          ? 'rgba(244, 63, 94, 0.04)'
+                          : 'transparent',
+                      }}
+                    >
+                      <td className="px-4 py-3 font-mono text-xs font-semibold text-[#00B2FF] whitespace-nowrap">
+                        {ncr.ncrNumber}
+                      </td>
+                      <td className="px-4 py-3 text-slate-200 max-w-xs">
+                        <div className="flex items-center gap-2">
+                          {/* Priority color dot */}
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${pri.dot}`} title={pri.label} />
+                          <span className="truncate">{ncr.title}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-300 text-xs">{ncr.department}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-block px-2.5 py-1 rounded-md text-xs ${STATUS_STYLES[ncr.status]}`}>
+                          {STATUS_LABELS[ncr.status]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-block px-2.5 py-1 rounded-md text-xs ${pri.pill}`}>
+                          {pri.label}
+                        </span>
+                      </td>
+                      <td className={`px-4 py-3 text-xs whitespace-nowrap ${overdue ? 'text-rose-400 font-semibold' : 'text-slate-300'}`}>
+                        {ncr.dueDate ? (
+                          <span className="flex items-center gap-1">
+                            {overdue && (
+                              <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                            {ncr.dueDate.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-slate-300 text-xs">{ncr.assignee}</td>
+                    </tr>
+                  );
+                })
               )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-900 border-b border-slate-800">
-                  <tr className="text-left text-slate-400">
-                    <SortableHeader label="NCR #" active={sortKey === 'ncrNumber'} dir={sortDir} onClick={() => handleSort('ncrNumber')} />
-                    <SortableHeader label="Title" active={sortKey === 'title'} dir={sortDir} onClick={() => handleSort('title')} />
-                    <SortableHeader label="Department" active={sortKey === 'department'} dir={sortDir} onClick={() => handleSort('department')} />
-                    <SortableHeader label="Status" active={sortKey === 'status'} dir={sortDir} onClick={() => handleSort('status')} />
-                    <SortableHeader label="Priority" active={sortKey === 'priority'} dir={sortDir} onClick={() => handleSort('priority')} />
-                    <SortableHeader label="Due Date" active={sortKey === 'dueDate'} dir={sortDir} onClick={() => handleSort('dueDate')} />
-                    <SortableHeader label="Assignee" active={sortKey === 'assignee'} dir={sortDir} onClick={() => handleSort('assignee')} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((n) => {
-                    const isOverdue = n.status !== 'closed' && toTime(n.dueDate) > 0 && toTime(n.dueDate) < Date.now();
-                    return (
-                      <tr
-                        key={n.id}
-                        onClick={() => router.push(`/dashboard/${n.id}`)}
-                        className="border-b border-slate-800 last:border-0 hover:bg-slate-800/40 cursor-pointer transition-colors"
-                      >
-                        <td className="px-4 py-3 font-mono text-sky-300">{n.ncrNumber}</td>
-                        <td className="px-4 py-3 text-slate-100 max-w-xs truncate">{n.title}</td>
-                        <td className="px-4 py-3 text-slate-300">{n.department || '—'}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium border ${STATUS_STYLES[n.status]}`}>
-                            {STATUS_LABELS[n.status]}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium border ${PRIORITY_STYLES[n.priority]}`}>
-                            {PRIORITY_LABELS[n.priority]}
-                          </span>
-                        </td>
-                        <td className={`px-4 py-3 ${isOverdue ? 'text-rose-400 font-medium' : 'text-slate-300'}`}>
-                          {formatDate(n.dueDate)}
-                          {isOverdue && <span className="ml-2 text-xs">⚠</span>}
-                        </td>
-                        <td className="px-4 py-3 text-slate-300">{n.assignee || '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+            </tbody>
+          </table>
         </div>
 
-        {!loading && filtered.length > 0 && (
-          <p className="text-xs text-slate-500 mt-3">
-            Showing {filtered.length} of {ncrs.length} NCRs
-          </p>
-        )}
+        <p className="mt-3 text-xs text-slate-500">
+          Showing {filtered.length} of {total} NCRs
+        </p>
       </main>
 
       <BrandFooter />
@@ -301,32 +330,21 @@ export default function DashboardPage() {
   );
 }
 
-function StatCard({ label, value, tone }: { label: string; value: number; tone: 'slate' | 'sky' | 'amber' | 'emerald' | 'rose' }) {
-  const tones: Record<typeof tone, string> = {
-    slate: 'text-slate-200',
-    sky: 'text-sky-300',
-    amber: 'text-amber-300',
-    emerald: 'text-emerald-300',
-    rose: 'text-rose-300',
-  };
+function StatCard({ label, value, color, highlight }: {
+  label: string; value: number; color: string; highlight?: boolean;
+}) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3">
-      <div className="text-xs text-slate-400 uppercase tracking-wide">{label}</div>
-      <div className={`text-2xl font-semibold mt-1 ${tones[tone]}`}>{value}</div>
-    </div>
-  );
-}
-
-function SortableHeader({ label, active, dir, onClick }: { label: string; active: boolean; dir: SortDir; onClick: () => void }) {
-  return (
-    <th
-      onClick={onClick}
-      className="px-4 py-3 font-medium text-xs uppercase tracking-wide cursor-pointer hover:text-sky-300 transition-colors select-none"
+    <div
+      className="rounded-xl p-4"
+      style={{
+        background: highlight && value > 0 ? 'rgba(244,63,94,0.08)' : '#0F1C30',
+        border: highlight && value > 0
+          ? '1px solid rgba(244,63,94,0.3)'
+          : '1px solid rgba(38,132,255,0.15)',
+      }}
     >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        {active && <span className="text-sky-400">{dir === 'asc' ? '▲' : '▼'}</span>}
-      </span>
-    </th>
+      <div className="text-xs text-slate-400 uppercase tracking-wider mb-2 font-medium">{label}</div>
+      <div className={`text-3xl font-bold ${color}`}>{value}</div>
+    </div>
   );
 }
